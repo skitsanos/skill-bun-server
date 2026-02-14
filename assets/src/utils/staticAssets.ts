@@ -1,5 +1,5 @@
 import { extname, resolve, sep } from 'path';
-import { lstatSync } from 'fs';
+import { lstat } from 'fs/promises';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -72,14 +72,14 @@ const staticAssets = ({
       return new Response('Not Found', { status: 404 });
     }
 
+    // Resolve and validate each segment to prevent symlink traversal
     let currentPath = safeRoot;
-    let filePath = safeRoot;
     for (const segment of relativePathParts) {
-      filePath = resolve(currentPath, segment);
-      currentPath = filePath;
+      currentPath = resolve(currentPath, segment);
 
       try {
-        if (lstatSync(filePath).isSymbolicLink()) {
+        const stats = await lstat(currentPath);
+        if (stats.isSymbolicLink()) {
           return new Response('Not Found', { status: 404 });
         }
       } catch {
@@ -87,22 +87,21 @@ const staticAssets = ({
       }
     }
 
-    filePath = resolve(assetsRoot, ...relativePathParts);
+    const filePath = currentPath;
     if (!filePath.startsWith(`${safeRoot}${sep}`) && filePath !== safeRoot) {
       return new Response('Not Found', { status: 404 });
     }
 
     const file = Bun.file(filePath);
-    let isFile = false;
+    let fileSize: number;
 
     try {
       const stats = await file.stat();
-      isFile = stats.isFile();
+      if (!stats.isFile()) {
+        return new Response('Not Found', { status: 404 });
+      }
+      fileSize = stats.size;
     } catch {
-      return new Response('Not Found', { status: 404 });
-    }
-
-    if (!isFile) {
       return new Response('Not Found', { status: 404 });
     }
 
@@ -112,7 +111,7 @@ const staticAssets = ({
     return new Response(file.stream(), {
       headers: {
         'Content-Type': contentType,
-        'Content-Length': String(file.size),
+        'Content-Length': String(fileSize),
         'Cache-Control': cacheControl,
         'Accept-Ranges': 'bytes',
       },

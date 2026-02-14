@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync } from 'fs';
-import { basename, dirname, join } from 'path';
+import { basename, dirname, join, relative } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as React from 'react';
 import { renderToReadableStream } from 'react-dom/server';
@@ -242,13 +242,14 @@ const processFile = async (
  */
 const processDirectory = async (
     dirPath: string,
-    files: { name: string }[]
+    files: { name: string }[],
+    urlRoutePath: string,
 ): Promise<RouteHandlers> => {
     const methodHandlers: RouteHandlers = {};
 
     for (const file of files) {
         const filePath = join(dirPath, file.name);
-        const result = await processFile(filePath, file.name, dirPath);
+        const result = await processFile(filePath, file.name, urlRoutePath);
 
         if (result) {
             const [method, handler] = result;
@@ -294,8 +295,7 @@ const scanDirectoryForRoutes = async (rootDir: string): Promise<Routes> => {
 
         // Build route path from directory structure
         // $paramName folders become :paramName in the route
-        const relativePath = dirPath.replace(rootDir, '');
-        const segments = relativePath.split(/[/\\]/).filter(Boolean);
+        const segments = relative(rootDir, dirPath).split(/[/\\]/).filter(Boolean);
         const routePath =
             '/' +
             segments
@@ -305,7 +305,7 @@ const scanDirectoryForRoutes = async (rootDir: string): Promise<Routes> => {
                 .join('/');
 
         // Process files in this directory
-        const handlers = await processDirectory(dirPath, files);
+        const handlers = await processDirectory(dirPath, files, routePath);
 
         if (Object.keys(handlers).length > 0) {
             routes[routePath === '/' ? '/' : routePath] = handlers;

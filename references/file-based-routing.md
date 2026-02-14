@@ -17,6 +17,7 @@ The `bun-server` template prefers this mode and asks for the user’s routing me
   - `head.ts` → `HEAD`
 - Folder names starting with `$` become path parameters (`$id` → `:id`).
 - Only files ending in `.ts/.tsx/.js/.jsx` are loaded.
+- Files prefixed with `_` (e.g., `_helpers.ts`) are ignored and can be used for shared utilities within route directories.
 - `index.tsx` can export a React component and is rendered server-side via `renderToReadableStream(...)`.
 
 ## Route loading shape
@@ -43,15 +44,14 @@ If a route supports multiple methods, its path maps to an object of handlers:
 
 ```ts
 import { readdirSync } from 'fs';
-import { basename, join } from 'path';
+import { basename, join, relative } from 'path';
 import { pathToFileURL } from 'url';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'];
 
 const routePathFromDir = (rootDir: string, dirPath: string) =>
   '/' +
-  dirPath
-    .replace(rootDir, '')
+  relative(rootDir, dirPath)
     .split(/[/\\]/)
     .filter(Boolean)
     .map((segment) =>

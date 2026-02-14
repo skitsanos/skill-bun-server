@@ -1,6 +1,6 @@
 ---
 name: bun-server
-description: Create high-performance web servers using Bun's native HTTP server with JSX/TSX server-side rendering, file-based routing, static assets, and middleware. Use when building APIs, web applications, or full-stack projects with Bun runtime (1.3+). Covers Bun.serve() with routes, cookies, WebSocket support, React SSR via renderToReadableStream, and Docker deployment.
+description: Create high-performance web servers using Bun's native HTTP server with JSX/TSX server-side rendering, file-based routing, static assets, and middleware. Use when building APIs, web applications, or full-stack projects with Bun runtime (1.3+). Covers Bun.serve() with routes, cookies, WebSocket support, React SSR via renderToReadableStream, Docker deployment, and file-based route loading from a directory tree.
 ---
 
 # bun-server Skill
@@ -18,116 +18,29 @@ Build web servers using Bun's native `Bun.serve()` API with JSX server-side rend
   - `Bun.redis`, `Bun.sql`, `bun:sqlite` when those stores are used.
 - Do not introduce `execa`, `express`, `pg`, `postgres.js`, `ioredis`, `better-sqlite3`, or `ws`.
 - Use `loadRoutes` (preferred) for route handlers and keep route files under `src/routes/`.
-- Ask the user which routing mode to use before generating route handlers (`loadRoutes` preferred).
-- Keep application files modular and helper utilities in `src/utils` as focused methods/files.
-- Use JSON payloads for API requests/responses by default; use multipart only for file uploads.
+- Ask the user which routing mode to use before generating route handlers (`loadRoutes` preferred). For non-route modes, clearly ask for explicit `Bun.serve()` routing.
+- Default API exchange format is JSON (`application/json`); use multipart only for file uploads.
+- Keep application files modular: small files and focused utilities in `src/utils`.
 - Serve static assets from `public/assets/{js,css,images}`.
-- See `references/creator-routing-and-architecture.md` for additional conventions.
 
 ## Quick Start
 
-Copy the starter template from `assets/` folder or initialize manually:
+When bootstrapping a new project, generate files matching the structure in `assets/`. Initialize with:
 
 ```bash
 bun init
-bun add react react-dom
+bun add react react-dom zod
 bun add -d @types/bun @types/react @types/react-dom
 ```
 
-Create `src/index.ts`:
-
-```typescript
-import { loadRoutes } from '@/utils/loadRoutes';
-import { matchRoute, resolveRoute } from '@/utils/loadRoutes';
-import staticAssets from '@/utils/staticAssets';
-import { resolve } from 'path';
-import corsResponse, { corsHeaders } from '@/middleware/cors';
-
-const envPort = process.env.PORT;
-const PORT = Number.parseInt(envPort || '3000', 10);
-const VALID_PORT = Number.isFinite(PORT) && PORT > 0 && PORT <= 65535 ? PORT : 3000;
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-
-async function startServer() {
-  const routes = await loadRoutes('routes');
-  const publicAssetsDir = resolve(process.cwd(), 'public', 'assets');
-  await Bun.$`mkdir -p ${publicAssetsDir} ${resolve(publicAssetsDir, 'js')} ${resolve(publicAssetsDir, 'css')} ${resolve(publicAssetsDir, 'images')}`;
-
-    const assetHandler = staticAssets({
-        assetsPath: 'public/assets',
-    });
-
-  const addCors = (response: Response) => {
-    const headers = new Headers(response.headers);
-    for (const [key, value] of Object.entries(corsHeaders())) {
-      headers.set(key, value);
-    }
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
-  };
-
-  Bun.serve({
-    port: VALID_PORT,
-    development: !IS_PRODUCTION,
-    routes,
-
-    async fetch(req) {
-      if (req.method === 'OPTIONS') {
-        return addCors(corsResponse());
-      }
-
-      const url = new URL(req.url);
-      if (url.pathname.startsWith('/assets/')) {
-        const staticResponse = await assetHandler(req);
-        if (staticResponse.status !== 404) {
-          return addCors(staticResponse);
-        }
-      }
-
-      const resolved = resolveRoute(routes, req);
-      if (resolved) return addCors(await resolved.handler(resolved.request));
-
-      const routeMatch = matchRoute(routes, url.pathname);
-      if (routeMatch && req.method === 'HEAD' && routeMatch.handlers.GET) {
-        const response = await routeMatch.handlers.GET(
-          new Request(req.url, {
-            method: 'GET',
-            headers: req.headers,
-          })
-        );
-        return addCors(
-          new Response(null, {
-            status: response.status,
-            headers: response.headers,
-          })
-        );
-      }
-
-      if (routeMatch) {
-        const allowedMethods = Object.keys(routeMatch.handlers).map((m) => m.toUpperCase());
-        if (!allowedMethods.includes('HEAD') && allowedMethods.includes('GET')) {
-          allowedMethods.push('HEAD');
-        }
-        return addCors(
-          new Response('Method Not Allowed', {
-            status: 405,
-            headers: { Allow: [...new Set(allowedMethods)].sort().join(', ') },
-          })
-        );
-      }
-
-      return addCors(new Response('Not Found', { status: 404 }));
-    },
-  });
-
-  console.log(`Server running at http://localhost:${VALID_PORT}`);
-}
-
-startServer().catch(console.error);
-```
+Use the reference code in `assets/src/` as the canonical source for:
+- `src/index.ts` — Server entry point wiring file-based routing, static assets, and CORS
+- `src/utils/loadRoutes.ts` — File-based route loader
+- `src/utils/staticAssets.ts` — Static asset handler
+- `src/utils/response.ts` — Response helpers
+- `src/utils/request.ts` — Request types
+- `src/middleware/cors.ts` — CORS middleware
+- `src/ui/Layout.tsx` — Base HTML layout component
 
 Run with hot reload: `bun run --hot src/index.ts`
 
@@ -156,7 +69,7 @@ project/
 │       ├── staticAssets.ts   # Static asset handler
 │       ├── request.ts        # Request types
 │       └── response.ts       # Response helpers
-├── public/                   # Static assets
+├── public/assets/            # Static assets (js/, css/, images/)
 ├── tsconfig.json
 ├── package.json
 └── Dockerfile
@@ -164,7 +77,7 @@ project/
 
 ## File-Based Routing
 
-Routes are loaded automatically from `src/routes/` using the route loader in `assets/src/utils/loadRoutes.ts`.
+Routes are loaded automatically from `src/routes/` using `loadRoutes` (reference implementation in `assets/src/utils/loadRoutes.ts`). See `references/file-based-routing.md` for full implementation details.
 
 ### Route File Naming
 
@@ -175,6 +88,8 @@ Routes are loaded automatically from `src/routes/` using the route loader in `as
 | `put.ts` | PUT | Update resource |
 | `delete.ts` | DELETE | Delete resource |
 | `patch.ts` | PATCH | Partial update |
+
+Files prefixed with `_` (e.g., `_helpers.ts`) are ignored by the route loader and can be used for shared utilities within route directories.
 
 ### Dynamic Parameters
 
@@ -188,7 +103,6 @@ src/routes/api/users/$id/put.ts    →  PUT /api/users/:id
 Access params via `req.params`:
 
 ```typescript
-// src/routes/api/users/$id/index.ts
 import type { RequestWithParams } from '@/utils/request';
 
 export default async (req: RequestWithParams) => {
@@ -199,10 +113,9 @@ export default async (req: RequestWithParams) => {
 
 ### React Components as Routes
 
-Export a React component as default - the route loader auto-detects and wraps it with SSR:
+Export a React component as default — the route loader auto-detects and wraps it with SSR:
 
 ```tsx
-// src/routes/index.tsx
 import Layout from '@/ui/Layout';
 
 export default ({ request }: { request: Request }) => (
@@ -217,12 +130,12 @@ export default ({ request }: { request: Request }) => (
 For simple cases, define routes directly in `Bun.serve()`:
 
 ```typescript
-serve({
+Bun.serve({
   routes: {
     '/health': Response.json({ status: 'ok' }),
-    
+
     '/api/users': () => Response.json({ users: [] }),
-    
+
     '/api/posts': {
       GET: () => Response.json({ posts: [] }),
       POST: async (req) => {
@@ -258,65 +171,21 @@ export default async (req: Request) => {
 };
 ```
 
-## Cookies (Bun 1.3+)
-
-```typescript
-serve({
-  routes: {
-    '/login': (req) => {
-      req.cookies.set('session', 'abc123', {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'strict',
-        maxAge: 60 * 60 * 24,
-      });
-      return Response.json({ success: true });
-    },
-    
-    '/profile': (req) => {
-      const session = req.cookies.get('session');
-      if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-      return Response.json({ session });
-    },
-    
-    '/logout': (req) => {
-      req.cookies.delete('session');
-      return Response.json({ success: true });
-    },
-  }
-});
-```
-
 ## Static Assets
 
-The `staticAssets` utility in `assets/src/utils/staticAssets.ts` handles static files with proper MIME types and caching.
+The `staticAssets` utility (reference implementation in `assets/src/utils/staticAssets.ts`) handles static files with proper MIME types, caching, and path-traversal protection. See `references/static-assets.md` for full API and CDN integration patterns.
 
 ```typescript
 import staticAssets from '@/utils/staticAssets';
 
-const assetHandler = staticAssets({
-    assetsPath: 'public/assets',
-    urlPrefix: '/assets',
-    cacheControl: 'public, max-age=31536000',
-});
-
-Bun.serve({
-    routes,
-    async fetch(req) {
-      if (new URL(req.url).pathname.startsWith('/assets/')) {
-        const staticResponse = await assetHandler(req);
-        if (staticResponse.status !== 404) return staticResponse;
-      }
-      return new Response('Not Found', { status: 404 });
-    },
-});
+const assetHandler = staticAssets({ assetsPath: 'public/assets' });
 ```
 
-See `references/static-assets.md` for CDN integration patterns.
+Wire it into `fetch` to intercept `/assets/*` requests before route matching.
 
 ## Response Helpers
 
-Use `assets/src/utils/response.ts` for consistent responses:
+Use the response helper (reference implementation in `assets/src/utils/response.ts`) for consistent responses:
 
 ```typescript
 import response from '@/utils/response';
@@ -338,43 +207,23 @@ return response.serverError();
 
 ## CORS Middleware
 
-Use `assets/src/middleware/cors.ts`:
+Use the CORS middleware (reference implementation in `assets/src/middleware/cors.ts`):
 
 ```typescript
 import corsResponse, { corsHeaders } from '@/middleware/cors';
 
-// Preflight response
+const origin = req.headers.get('Origin');
+
 if (req.method === 'OPTIONS') {
-    return corsResponse({ origin: 'https://example.com' });
+    return corsResponse({ origin: 'https://example.com' }, origin);
 }
 
-// Add headers to response
-const headers = corsHeaders({ credentials: true });
+const headers = corsHeaders({ credentials: true }, origin);
 ```
 
-Default CORS behavior is permissive (`*`) and intended for development; always review/override it for production deployments.
+When multiple origins are configured as an array, the middleware matches the request `Origin` header against the list and returns the matching one (per CORS spec, `Access-Control-Allow-Origin` only supports a single origin or `*`). A `Vary: Origin` header is added automatically when the response is origin-specific.
 
-## Request Validation with Zod
-
-```typescript
-import { z } from 'zod';
-
-const UserSchema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-});
-
-export default async (req: Request) => {
-  const body = await req.json();
-  const result = UserSchema.safeParse(body);
-  
-  if (!result.success) {
-    return Response.json({ error: result.error.flatten() }, { status: 400 });
-  }
-  
-  return Response.json({ user: result.data }, { status: 201 });
-};
-```
+Default CORS is permissive (`*`) for development; review/override for production.
 
 ## TypeScript Configuration
 
@@ -386,74 +235,26 @@ export default async (req: Request) => {
     "lib": ["ESNext", "DOM"],
     "target": "ESNext",
     "module": "ESNext",
+    "moduleDetection": "force",
     "jsx": "react-jsx",
+    "allowJs": true,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
   }
 }
 ```
 
-## Docker Deployment
-
-```dockerfile
-FROM oven/bun AS base
-WORKDIR /app
-
-FROM base AS deps
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
-
-FROM base AS runner
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-ENV NODE_ENV=production
-ENV PORT=3000
-EXPOSE 3000
-
-USER bun
-CMD ["bun", "run", "src/index.ts"]
-```
-
-## Starter Template
-
-The `assets/` folder contains a complete starter project:
-
-```
-assets/
-├── src/
-│   ├── index.ts          # Server with file-based routing
-│   ├── routes/
-│   │   ├── index.tsx     # Home page
-│   │   └── api/health/index.ts
-│   ├── middleware/cors.ts
-│   ├── ui/Layout.tsx
-│   └── utils/
-│       ├── loadRoutes.ts
-│       ├── staticAssets.ts
-│       ├── request.ts
-│       └── response.ts
-├── package.json
-├── tsconfig.json
-├── Dockerfile
-└── .dockerignore
-```
-
-Copy and run:
-
-```bash
-cp -r assets/* ./my-project/
-cd my-project
-bun install
-bun run dev
-```
-
 ## References
 
-- `references/file-based-routing.md` - Route loader implementation details
-- `references/static-assets.md` - Static asset handling with MIME types and CDN
-- `assets/` - Complete starter template
+- `references/file-based-routing.md` — Route loader implementation, path matching, 405/HEAD behavior
+- `references/static-assets.md` — Static asset handler API, MIME types, CDN integration
+- `references/cookies-and-validation.md` — Bun cookie API and Zod request validation patterns
+- `references/docker-deployment.md` — Dockerfile, build stages, health check, .dockerignore
+- `assets/` — Reference implementation (canonical source code for bootstrapping new projects)

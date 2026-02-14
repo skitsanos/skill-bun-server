@@ -1,6 +1,6 @@
 const response = {
     json: <T>(data: T, status = 200) =>
-        Response.json({ result: data }, { status }),
+        Response.json(data, { status }),
 
     error: (message: string, status = 400, details?: any) =>
         Response.json({ error: { message, ...details } }, { status }),
