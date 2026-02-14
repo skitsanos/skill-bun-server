@@ -1,0 +1,25 @@
+# Source control
+.git
+
+# Dependencies
+node_modules
+bun.lockb
+
+# Build / cache
+.bun
+.dockerignore
+
+# Logs
+npm-debug.log*
+bun-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env
+.env
+.env.*
+
+# IDE / OS
+.DS_Store
+.vscode
+.idea

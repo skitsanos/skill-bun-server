@@ -1,0 +1,24 @@
+# Node/Bun
+node_modules/
+*.bun
+bun.lockb
+
+# Build and cache
+/dist
+/.turbo
+/.output
+
+# Environment files
+.env
+.env.*
+
+# Logs
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Bun caches
+.bun/
